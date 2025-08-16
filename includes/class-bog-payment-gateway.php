@@ -245,7 +245,7 @@ class BOG_Payment_Gateway extends WC_Payment_Gateway {
     
     public function process_refund($order_id, $amount = null, $reason = '') {
         $order = wc_get_order($order_id);
-        $bog_order_id = $order->get_meta('_bog_order_id');
+        $bog_order_id = $order ? $order->get_meta('_bog_order_id', true) : '';
         
         if (!$bog_order_id) {
             return new WP_Error('error', __('Bank of Georgia order ID not found', 'bog-payment-gateway'));

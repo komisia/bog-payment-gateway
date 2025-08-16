@@ -81,9 +81,13 @@ AQIDAQAB
             $order = wc_get_order($external_order_id);
         } else {
             $args = array(
-                'meta_key' => '_bog_order_id',
-                'meta_value' => $bog_order_id,
-                'meta_compare' => '=',
+                'meta_query' => array(
+                    array(
+                        'key' => '_bog_order_id',
+                        'value' => $bog_order_id,
+                        'compare' => '='
+                    )
+                ),
                 'return' => 'ids',
                 'limit' => 1,
             );

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:api.bog.ge)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(wp plugin deactivate:*)",
+      "Bash(wp plugin activate:*)"
     ],
     "deny": [],
     "ask": []

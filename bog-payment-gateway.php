@@ -38,6 +38,7 @@ class BOG_Payment_Gateway_Init {
         add_action('plugins_loaded', array($this, 'init'));
         add_filter('woocommerce_payment_gateways', array($this, 'add_gateway'));
         add_action('init', array($this, 'register_callback_endpoint'));
+        add_action('before_woocommerce_init', array($this, 'declare_hpos_compatibility'));
         
         register_activation_hook(__FILE__, array($this, 'activate'));
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
@@ -87,7 +88,8 @@ class BOG_Payment_Gateway_Init {
         }
         
         $order = wc_get_order($order_id);
-        if (!$order || $order->get_meta('_bog_order_id') !== $bog_order_id) {
+        $stored_bog_order_id = $order ? $order->get_meta('_bog_order_id', true) : '';
+        if (!$order || $stored_bog_order_id !== $bog_order_id) {
             wp_redirect(wc_get_checkout_url());
             exit;
         }
@@ -122,6 +124,12 @@ class BOG_Payment_Gateway_Init {
         wc_add_notice(__('Payment was not completed. Please try again.', 'bog-payment-gateway'), 'error');
         wp_redirect(wc_get_checkout_url());
         exit;
+    }
+    
+    public function declare_hpos_compatibility() {
+        if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
+            \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+        }
     }
     
     public function load_textdomain() {
