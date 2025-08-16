@@ -35,10 +35,13 @@ class BOG_Payment_Gateway_Init {
     }
     
     private function __construct() {
-        add_action('plugins_loaded', array($this, 'init'));
-        add_filter('woocommerce_payment_gateways', array($this, 'add_gateway'));
+        add_action('plugins_loaded', array($this, 'init'), 11);
+        add_filter('woocommerce_payment_gateways', array($this, 'add_gateway'), 10);
         add_action('init', array($this, 'register_callback_endpoint'));
         add_action('before_woocommerce_init', array($this, 'declare_hpos_compatibility'));
+        
+        // Register blocks support early
+        add_action('woocommerce_blocks_loaded', array($this, 'woocommerce_blocks_support'));
         
         register_activation_hook(__FILE__, array($this, 'activate'));
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
@@ -53,9 +56,19 @@ class BOG_Payment_Gateway_Init {
         $this->load_textdomain();
         $this->includes();
         
+        // Initialize the gateway class early
+        add_action('woocommerce_init', array($this, 'init_gateway_class'));
+        
         add_action('woocommerce_api_bog_callback', array($this, 'handle_callback'));
         add_action('woocommerce_api_bog_success', array($this, 'handle_success_redirect'));
         add_action('woocommerce_api_bog_fail', array($this, 'handle_fail_redirect'));
+    }
+    
+    public function init_gateway_class() {
+        // Ensure the gateway class is available
+        if (!class_exists('BOG_Payment_Gateway')) {
+            require_once BOG_PAYMENT_GATEWAY_PLUGIN_DIR . 'includes/class-bog-payment-gateway.php';
+        }
     }
     
     private function includes() {
@@ -65,7 +78,9 @@ class BOG_Payment_Gateway_Init {
     }
     
     public function add_gateway($gateways) {
-        $gateways[] = 'BOG_Payment_Gateway';
+        if (class_exists('BOG_Payment_Gateway')) {
+            $gateways[] = 'BOG_Payment_Gateway';
+        }
         return $gateways;
     }
     
@@ -176,6 +191,23 @@ class BOG_Payment_Gateway_Init {
     
     public function deactivate() {
         flush_rewrite_rules();
+    }
+    
+    /**
+     * Add support for WooCommerce Blocks
+     */
+    public function woocommerce_blocks_support() {
+        if (class_exists('Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType')) {
+            require_once BOG_PAYMENT_GATEWAY_PLUGIN_DIR . 'includes/class-bog-blocks-integration.php';
+            
+            add_action(
+                'woocommerce_blocks_payment_method_type_registration',
+                function($payment_method_registry) {
+                    $payment_method_registry->register(new BOG_Blocks_Integration());
+                },
+                5
+            );
+        }
     }
 }
 

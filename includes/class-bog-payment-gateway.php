@@ -118,6 +118,36 @@ class BOG_Payment_Gateway extends WC_Payment_Gateway {
         return in_array(get_woocommerce_currency(), array('GEL'), true);
     }
     
+    public function is_available() {
+        $is_available = parent::is_available();
+        
+        if (!$is_available) {
+            return false;
+        }
+        
+        // Check if gateway is enabled
+        if ($this->enabled !== 'yes') {
+            return false;
+        }
+        
+        // Check if currency is supported
+        if (!$this->is_valid_for_use()) {
+            return false;
+        }
+        
+        // Check if API credentials are configured
+        if (empty($this->client_id) || empty($this->client_secret)) {
+            return false;
+        }
+        
+        // Only check cart on frontend checkout
+        if (!is_admin() && is_checkout() && !WC()->cart) {
+            return false;
+        }
+        
+        return true;
+    }
+    
     public function process_admin_options() {
         $saved = parent::process_admin_options();
         
