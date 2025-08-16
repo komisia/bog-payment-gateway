@@ -1,5 +1,5 @@
 === Bank of Georgia Payment Gateway ===
-Contributors: yourname
+Contributors: Giorgi Berikelashvili
 Tags: woocommerce, payment gateway, bank of georgia, bog, georgia
 Requires at least: 5.0
 Tested up to: 6.4

@@ -1,11 +1,11 @@
 <?php
 /**
  * Plugin Name: Bank of Georgia Payment Gateway
- * Plugin URI: https://your-domain.com/
+ * Plugin URI: https://fb.me/komisia
  * Description: Accept payments through Bank of Georgia payment system in WooCommerce
  * Version: 1.0.0
- * Author: Your Company
- * Author URI: https://your-domain.com/
+ * Author: Giorgi Berikelashvili
+ * Author URI: https://fb.me/komisia
  * Text Domain: bog-payment-gateway
  * Domain Path: /languages
  * Requires at least: 5.0
