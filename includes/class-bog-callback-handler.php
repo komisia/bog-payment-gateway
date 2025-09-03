@@ -53,16 +53,27 @@ AQIDAQAB
         }
         
         // Check for signature but don't require it (optional per BOG docs)
-        $signature = isset($headers['signature']) ? $headers['signature'] : 
-                     (isset($headers['Signature']) ? $headers['Signature'] : '');
+        // BOG sends signature in 'Callback-Signature' header
+        $signature = '';
+        if (isset($headers['Callback-Signature'])) {
+            $signature = $headers['Callback-Signature'];
+        } elseif (isset($headers['callback-signature'])) {
+            $signature = $headers['callback-signature'];
+        } elseif (isset($headers['signature'])) {
+            $signature = $headers['signature'];
+        } elseif (isset($headers['Signature'])) {
+            $signature = $headers['Signature'];
+        }
         
         if ($signature) {
             $signature_valid = $this->verify_signature($body, $signature);
-            if (!$signature_valid) {
-                $this->log('Signature verification failed, but continuing processing', 'warning');
+            if ($signature_valid) {
+                $this->log('Signature verified successfully');
+            } else {
+                $this->log('Signature verification failed, but continuing processing (signature is optional)', 'info');
             }
         } else {
-            $this->log('No signature provided in callback headers', 'warning');
+            $this->log('No signature found in headers (checked Callback-Signature, signature)', 'info');
         }
         
         $data = json_decode($body, true);
