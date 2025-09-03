@@ -4,7 +4,8 @@
       "WebFetch(domain:api.bog.ge)",
       "Bash(mkdir:*)",
       "Bash(wp plugin deactivate:*)",
-      "Bash(wp plugin activate:*)"
+      "Bash(wp plugin activate:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []

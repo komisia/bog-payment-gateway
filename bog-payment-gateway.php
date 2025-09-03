@@ -43,6 +43,10 @@ class BOG_Payment_Gateway_Init {
         // Register blocks support early
         add_action('woocommerce_blocks_loaded', array($this, 'woocommerce_blocks_support'));
         
+        // Add admin actions for manual status check
+        add_action('woocommerce_order_actions', array($this, 'add_check_payment_action'));
+        add_action('woocommerce_order_action_bog_check_payment', array($this, 'process_check_payment_action'));
+        
         register_activation_hook(__FILE__, array($this, 'activate'));
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
     }
@@ -94,45 +98,118 @@ class BOG_Payment_Gateway_Init {
     }
     
     public function handle_success_redirect() {
-        $order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : 0;
-        $bog_order_id = isset($_GET['bog_order_id']) ? sanitize_text_field($_GET['bog_order_id']) : '';
+        // Log redirect for debugging
+        if (class_exists('WC_Logger')) {
+            $logger = wc_get_logger();
+            $logger->info('Success redirect received: ' . json_encode($_GET), array('source' => 'bog-payment-gateway'));
+        }
         
-        if (!$order_id || !$bog_order_id) {
+        $order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : 0;
+        
+        if (!$order_id) {
+            wc_add_notice(__('Invalid order information. Please contact support.', 'bog-payment-gateway'), 'error');
             wp_redirect(wc_get_checkout_url());
             exit;
         }
         
         $order = wc_get_order($order_id);
-        $stored_bog_order_id = $order ? $order->get_meta('_bog_order_id', true) : '';
-        if (!$order || $stored_bog_order_id !== $bog_order_id) {
+        if (!$order) {
+            wc_add_notice(__('Order not found. Please contact support.', 'bog-payment-gateway'), 'error');
             wp_redirect(wc_get_checkout_url());
             exit;
         }
         
-        $gateway = new BOG_Payment_Gateway();
-        $payment_status = $gateway->check_payment_status($bog_order_id);
-        
-        if ($payment_status && $payment_status['status'] === 'completed') {
-            $order->payment_complete($bog_order_id);
-            $order->add_order_note(__('Payment completed via Bank of Georgia', 'bog-payment-gateway'));
-            
+        // Check if order is already paid
+        if ($order->is_paid()) {
             WC()->cart->empty_cart();
-            
             wp_redirect($order->get_checkout_order_received_url());
-        } else {
-            wc_add_notice(__('Payment verification failed. Please contact support.', 'bog-payment-gateway'), 'error');
-            wp_redirect(wc_get_checkout_url());
+            exit;
         }
+        
+        // Get the stored BOG order ID
+        $bog_order_id = $order->get_meta('_bog_order_id', true);
+        
+        if ($bog_order_id) {
+            try {
+                // Always check payment status via API on success redirect
+                $gateway = new BOG_Payment_Gateway();
+                $payment_status = $gateway->check_payment_status($bog_order_id);
+                
+                if ($payment_status) {
+                    if (class_exists('WC_Logger')) {
+                        $logger->info('Payment status check result: ' . json_encode($payment_status), array('source' => 'bog-payment-gateway'));
+                    }
+                    
+                    if ($payment_status['status'] === 'completed') {
+                        // Payment successful - mark order as completed
+                        $order->payment_complete($bog_order_id);
+                        $order->update_status('completed', __('Payment confirmed via Bank of Georgia', 'bog-payment-gateway'));
+                        
+                        // Add transaction details if available
+                        if (isset($payment_status['details']['payment_detail'])) {
+                            $payment_detail = $payment_status['details']['payment_detail'];
+                            $transaction_id = isset($payment_detail['transaction_id']) ? $payment_detail['transaction_id'] : '';
+                            if ($transaction_id) {
+                                $order->set_transaction_id($transaction_id);
+                                $order->save();
+                            }
+                        }
+                        
+                        WC()->cart->empty_cart();
+                        wp_redirect($order->get_checkout_order_received_url());
+                        exit;
+                    } elseif ($payment_status['status'] === 'pending' || $payment_status['status'] === 'processing') {
+                        // Payment still processing - wait for callback
+                        $order->update_status('on-hold', __('Payment is being processed by Bank of Georgia', 'bog-payment-gateway'));
+                        $order->add_order_note(__('Customer returned from payment page. Awaiting final confirmation.', 'bog-payment-gateway'));
+                        
+                        WC()->cart->empty_cart();
+                        wp_redirect($order->get_checkout_order_received_url());
+                        exit;
+                    } else {
+                        // Payment failed or unknown status
+                        wc_add_notice(__('Payment was not successful. Please try again.', 'bog-payment-gateway'), 'error');
+                        wp_redirect(wc_get_checkout_url());
+                        exit;
+                    }
+                }
+            } catch (Exception $e) {
+                // Log error but don't fail the redirect
+                if (class_exists('WC_Logger')) {
+                    $logger = wc_get_logger();
+                    $logger->error('Error checking payment status: ' . $e->getMessage(), array('source' => 'bog-payment-gateway'));
+                }
+                
+                // Mark as on-hold and wait for callback
+                $order->update_status('on-hold', __('Awaiting payment confirmation from Bank of Georgia', 'bog-payment-gateway'));
+            }
+        } else {
+            // No BOG order ID - this shouldn't happen
+            $order->add_order_note(__('Warning: BOG order ID not found. Awaiting callback.', 'bog-payment-gateway'));
+            $order->update_status('on-hold', __('Awaiting payment confirmation', 'bog-payment-gateway'));
+        }
+        
+        WC()->cart->empty_cart();
+        wp_redirect($order->get_checkout_order_received_url());
         exit;
     }
     
     public function handle_fail_redirect() {
+        // Log redirect for debugging
+        if (class_exists('WC_Logger')) {
+            $logger = wc_get_logger();
+            $logger->info('Fail redirect received: ' . json_encode($_GET), array('source' => 'bog-payment-gateway'));
+        }
+        
         $order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : 0;
         
         if ($order_id) {
             $order = wc_get_order($order_id);
             if ($order) {
-                $order->update_status('failed', __('Payment failed at Bank of Georgia', 'bog-payment-gateway'));
+                // Only update to failed if not already processed
+                if (!$order->is_paid() && $order->get_status() !== 'failed') {
+                    $order->update_status('failed', __('Payment cancelled or failed at Bank of Georgia', 'bog-payment-gateway'));
+                }
             }
         }
         
@@ -207,6 +284,77 @@ class BOG_Payment_Gateway_Init {
                 },
                 5
             );
+        }
+    }
+    
+    /**
+     * Add manual payment check action to order actions
+     */
+    public function add_check_payment_action($actions) {
+        global $theorder;
+        
+        if (!$theorder) {
+            return $actions;
+        }
+        
+        // Only add for BOG payment method
+        if ($theorder->get_payment_method() !== 'bog_payment') {
+            return $actions;
+        }
+        
+        // Only for pending or on-hold orders
+        if (!in_array($theorder->get_status(), array('pending', 'on-hold', 'processing'))) {
+            return $actions;
+        }
+        
+        $bog_order_id = $theorder->get_meta('_bog_order_id', true);
+        if ($bog_order_id) {
+            $actions['bog_check_payment'] = __('Check BOG Payment Status', 'bog-payment-gateway');
+        }
+        
+        return $actions;
+    }
+    
+    /**
+     * Process manual payment check action
+     */
+    public function process_check_payment_action($order) {
+        $bog_order_id = $order->get_meta('_bog_order_id', true);
+        
+        if (!$bog_order_id) {
+            $order->add_order_note(__('Cannot check payment status: BOG order ID not found', 'bog-payment-gateway'));
+            return;
+        }
+        
+        try {
+            $gateway = new BOG_Payment_Gateway();
+            $payment_status = $gateway->check_payment_status($bog_order_id);
+            
+            if ($payment_status) {
+                $order->add_order_note(sprintf(
+                    __('Manual status check - BOG Status: %s', 'bog-payment-gateway'),
+                    $payment_status['bog_status']
+                ));
+                
+                if ($payment_status['status'] === 'completed' && !$order->is_paid()) {
+                    $order->payment_complete($bog_order_id);
+                    $order->add_order_note(__('Payment confirmed via manual status check', 'bog-payment-gateway'));
+                } elseif ($payment_status['status'] === 'failed' && $order->get_status() !== 'failed') {
+                    $order->update_status('failed', __('Payment failed (confirmed via manual check)', 'bog-payment-gateway'));
+                }
+                
+                // Store the full response for debugging
+                $order->update_meta_data('_bog_last_manual_check', current_time('mysql'));
+                $order->update_meta_data('_bog_last_status_response', json_encode($payment_status['details']));
+                $order->save();
+            } else {
+                $order->add_order_note(__('Failed to retrieve payment status from BOG API', 'bog-payment-gateway'));
+            }
+        } catch (Exception $e) {
+            $order->add_order_note(sprintf(
+                __('Error checking payment status: %s', 'bog-payment-gateway'),
+                $e->getMessage()
+            ));
         }
     }
 }

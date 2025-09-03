@@ -173,23 +173,39 @@ class BOG_Payment_Gateway extends WC_Payment_Gateway {
     public function process_payment($order_id) {
         $order = wc_get_order($order_id);
         
+        if ($this->debug) {
+            $logger = wc_get_logger();
+            $logger->info('Starting payment processing for order #' . $order_id, array('source' => 'bog-payment-gateway'));
+        }
+        
         try {
-            $callback_url = add_query_arg('wc-api', 'bog_callback', home_url('/'));
+            // Use HTTPS for callback URL
+            $home_url = str_replace('http://', 'https://', home_url('/'));
+            $callback_url = add_query_arg('wc-api', 'bog_callback', $home_url);
+            
+            // Success URL - don't include {order_id} placeholder as BOG doesn't replace it
             $success_url = add_query_arg(
                 array(
                     'wc-api' => 'bog_success',
                     'order_id' => $order_id,
-                    'bog_order_id' => '{order_id}',
                 ),
-                home_url('/')
+                $home_url
             );
+            
+            // Fail URL
             $fail_url = add_query_arg(
                 array(
                     'wc-api' => 'bog_fail',
                     'order_id' => $order_id,
                 ),
-                home_url('/')
+                $home_url
             );
+            
+            if ($this->debug) {
+                $logger->info('Callback URL: ' . $callback_url, array('source' => 'bog-payment-gateway'));
+                $logger->info('Success URL: ' . $success_url, array('source' => 'bog-payment-gateway'));
+                $logger->info('Fail URL: ' . $fail_url, array('source' => 'bog-payment-gateway'));
+            }
             
             $basket = array();
             foreach ($order->get_items() as $item) {
